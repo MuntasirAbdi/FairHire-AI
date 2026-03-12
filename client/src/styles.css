@@ -322,3 +322,16 @@ label input, label textarea { margin-top: 0.45rem; font-weight: 400; }
   50% { opacity: 1 }
   100% { opacity: 0.7 }
 }
+input[type="file"] {
+  display: block;
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid #ddd6fe;
+  border-radius: 12px;
+  background: #faf7ff;
+  width: 100%;
+}
+
+.small {
+  font-size: 0.9rem;
+}

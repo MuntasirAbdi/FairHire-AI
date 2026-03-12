@@ -14,7 +14,8 @@ const initialApplicantForm = {
   name: '',
   email: '',
   resumeText: '',
-  careerBreakContext: ''
+  careerBreakContext: '',
+  resumeFile: null
 };
 
 function StatCard({ label, value, hint }) {
@@ -181,31 +182,48 @@ async function rewriteWithGemini() {
     }
   }
 
-  async function submitApplication() {
-    if (!selectedJob) {
-      setError('Publish or select a job first.');
-      return;
-    }
-    setSubmitting(true);
-    setError('');
-    try {
-      const res = await fetch('/api/applications', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...applicantForm, jobId: selectedJob.id })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Application failed');
-      setApplicantForm(initialApplicantForm);
-      await fetchData();
-      setView('employer');
-      setSelectedJobId(selectedJob.id);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSubmitting(false);
-    }
+async function submitApplication() {
+  if (!selectedJob) {
+    setError('Publish or select a job first.');
+    return;
   }
+
+  setSubmitting(true);
+  setError('');
+
+  try {
+    const formData = new FormData();
+    formData.append('jobId', selectedJob.id);
+    formData.append('name', applicantForm.name);
+    formData.append('email', applicantForm.email);
+    formData.append('resumeText', applicantForm.resumeText || '');
+    formData.append('careerBreakContext', applicantForm.careerBreakContext || '');
+
+    if (applicantForm.resumeFile) {
+      formData.append('resumeFile', applicantForm.resumeFile);
+    }
+
+    const res = await fetch('/api/applications', {
+      method: 'POST',
+      body: formData
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Application failed');
+    }
+
+    setApplicantForm(initialApplicantForm);
+    await fetchData();
+    setView('employer');
+    setSelectedJobId(selectedJob.id);
+  } catch (err) {
+    setError(err.message);
+  } finally {
+    setSubmitting(false);
+  }
+}
 
   return (
     <div className="app-shell">
@@ -463,15 +481,33 @@ async function rewriteWithGemini() {
                 </div>
 
                 <label>
-                  Resume text
-                  <textarea
-                    rows={11}
-                    value={applicantForm.resumeText}
-                    onChange={(e) => setApplicantForm({ ...applicantForm, resumeText: e.target.value })}
-                    placeholder="Paste the resume here. For a hackathon demo, text paste is faster and more reliable than file parsing."
-                  />
-                </label>
+  Resume text
+  <textarea
+    rows={11}
+    value={applicantForm.resumeText}
+    onChange={(e) =>
+      setApplicantForm({ ...applicantForm, resumeText: e.target.value })
+    }
+    placeholder="Paste the resume here, or leave this blank and upload a PDF below."
+  />
+</label>
 
+<label>
+  Or upload a PDF resume
+  <input
+    type="file"
+    accept=".pdf,application/pdf"
+    onChange={(e) =>
+      setApplicantForm({
+        ...applicantForm,
+        resumeFile: e.target.files?.[0] || null
+      })
+    }
+  />
+  {applicantForm.resumeFile ? (
+    <div className="muted small">Selected: {applicantForm.resumeFile.name}</div>
+  ) : null}
+</label>
                 <label>
                   Optional context for a career break or caregiving history
                   <textarea
