@@ -1,15 +1,14 @@
-import { Router } from 'express';
-import { importIndeedPosting } from '../services/indeedService.js';
+import { Router } from "express";
+import { importIndeedJob } from "../services/indeedService.js";
 
 const router = Router();
 
-router.post('/import', async (req, res) => {
+router.post("/import", async (req, res) => {
   try {
-    const result = await importIndeedPosting({
-      url: req.body.url,
-      text: req.body.text
-    });
-    res.json(result);
+    const { url, pastedText } = req.body;
+
+    const job = await importIndeedJob({ url, pastedText });
+    res.json(job);
   } catch (error) {
     res.status(400).json({ error: error.message });
   }

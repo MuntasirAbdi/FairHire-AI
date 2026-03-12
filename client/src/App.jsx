@@ -58,6 +58,8 @@ export default function App() {
   const [publishing, setPublishing] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [selectedApplication, setSelectedApplication] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
 
   async function fetchData() {
     const [jobsRes, appsRes] = await Promise.all([
@@ -115,8 +117,11 @@ export default function App() {
     }
   }
 
-  async function rewriteWithGemini() {
-    setError('');
+async function rewriteWithGemini() {
+  setError('');
+  setAiLoading(true);
+
+  try {
     const res = await fetch('/api/ai/rewrite-job', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -127,18 +132,28 @@ export default function App() {
         location: employerForm.location
       })
     });
+
     const data = await res.json();
+
     if (!res.ok) {
       setError(data.error || 'Rewrite failed');
       return;
     }
+
     setEmployerForm((prev) => ({
       ...prev,
       originalDescription: prev.description,
       inclusiveDescription: data.rewrittenDescription
     }));
+
     setAnalysis(data.analysis);
+
+  } catch (err) {
+    setError("AI request failed.");
+  } finally {
+    setAiLoading(false);
   }
+}
 
   async function publishJob() {
     setPublishing(true);
@@ -196,7 +211,7 @@ export default function App() {
     <div className="app-shell">
       <header className="hero">
         <div>
-          <span className="badge">GDG Showcase • Women in Tech</span>
+          <span className="badge">• GDG Showcase •</span>
           <h1>FairHire AI</h1>
           <p className="hero-copy">
             Import a job post, detect exclusionary language, rewrite it with Gemini, and review applicants through blind, potential-based screening.
@@ -232,9 +247,16 @@ export default function App() {
         </aside>
 
         <section className="main-panel">
-          {error ? <div className="error-banner">{error}</div> : null}
 
-          {view === 'employer' ? (
+  {error ? <div className="error-banner">{error}</div> : null}
+
+  {aiLoading && (
+    <div className="ai-working-banner">
+      Gemini is analyzing the job description and detecting bias...
+    </div>
+  )}
+
+  {view === 'employer' ? (
             <>
               <SectionCard
                 title="Employer dashboard"
@@ -248,7 +270,7 @@ export default function App() {
                       <input
                         value={employerForm.sourceUrl}
                         onChange={(e) => setEmployerForm({ ...employerForm, sourceUrl: e.target.value })}
-                        placeholder="https://ca.indeed.com/viewjob?jk=... or any public job URL"
+                        placeholder="Insert public job URL"
                       />
                       <button onClick={importIndeed} disabled={importing}>{importing ? 'Importing...' : 'Import from link'}</button>
                     </div>
@@ -296,7 +318,10 @@ export default function App() {
                 </div>
 
                 <div className="inline-row wrap">
-                  <button onClick={rewriteWithGemini}>Rewrite with Gemini</button>
+                  <button onClick={rewriteWithGemini} disabled={aiLoading}>
+  {aiLoading ? "Gemini analyzing..." : "Rewrite with Gemini"}
+</button>
+
                   <button className="primary" onClick={publishJob} disabled={publishing}>
                     {publishing ? 'Publishing...' : 'Publish opening'}
                   </button>
@@ -311,46 +336,105 @@ export default function App() {
                       <ScorePill label="Inclusivity" score={analysis.inclusivityScore} />
                       <ScorePill label="Clarity" score={analysis.clarityScore} />
                     </div>
-                    <ul className="insight-list">
-                      {analysis.detectedBiases.map((item) => (
-                        <li key={item.phrase}>
-                          <strong>{item.phrase}</strong>
-                          <span>{item.reason}</span>
-                        </li>
-                      ))}
-                    </ul>
+                    <div className="insight-scroll">
+  <ul className="insight-list">
+    {analysis.detectedBiases.map((item, index) => (
+      <li key={`${item.phrase}-${index}`}>
+        <strong>{item.phrase}</strong>
+        <span>{item.reason}</span>
+      </li>
+    ))}
+  </ul>
+</div>
                   </>
                 ) : null}
               </SectionCard>
 
               <SectionCard title="Applicant rankings" subtitle="Blind, potential-based review for the selected job.">
-                {!selectedJob ? <p className="muted">Publish a job to see rankings.</p> : null}
-                <div className="ranking-grid">
-                  {rankedApplications.map((app) => (
-                    <article className="ranking-card" key={app.id}>
-                      <h3>{app.blindProfile.alias}</h3>
-                      <div className="pill-row wrap">
-                        <ScorePill label="Match" score={app.analysis.matchScore} />
-                        <ScorePill label="Potential" score={app.analysis.potentialScore} />
-                        <ScorePill label="Fairness confidence" score={app.analysis.fairnessConfidence} />
-                      </div>
-                      <p>{app.analysis.summary}</p>
-                      <div className="small-block">
-                        <strong>Strengths</strong>
-                        <ul>
-                          {app.analysis.strengths.map((s) => <li key={s}>{s}</li>)}
-                        </ul>
-                      </div>
-                      <div className="small-block">
-                        <strong>Concerns</strong>
-                        <ul>
-                          {app.analysis.concerns.map((c) => <li key={c}>{c}</li>)}
-                        </ul>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              </SectionCard>
+  {!selectedJob ? <p className="muted">Publish a job to see rankings.</p> : null}
+
+  <div className="ranking-grid">
+    {rankedApplications.map((app, index) => (
+      <button
+        key={app.id}
+        className="ranking-card ranking-card-clickable"
+        onClick={() => setSelectedApplication(app)}
+      >
+        <div className="ranking-top">
+          <div>
+            <div className="ranking-rank">#{index + 1}</div>
+            <h3>{app.blindProfile.alias}</h3>
+          </div>
+          <div className="ranking-score-circle small-circle">
+            <span>{app.analysis.potentialScore}</span>
+            <small>Potential</small>
+          </div>
+        </div>
+
+        <div className="pill-row wrap">
+          <ScorePill label="Match" score={app.analysis.matchScore} />
+          <ScorePill label="Potential" score={app.analysis.potentialScore} />
+          <ScorePill label="Fairness" score={app.analysis.fairnessConfidence} />
+        </div>
+
+        <p className="ranking-summary">
+          {app.analysis.summary}
+        </p>
+
+        <div className="muted tiny">Click to view full candidate analysis</div>
+      </button>
+    ))}
+  </div>
+</SectionCard>
+{selectedApplication ? (
+  <div className="candidate-overlay" onClick={() => setSelectedApplication(null)}>
+    <div className="candidate-modal" onClick={(e) => e.stopPropagation()}>
+      <div className="candidate-modal-header">
+        <div>
+          <div className="ranking-rank">Detailed Review</div>
+          <h2>{selectedApplication.blindProfile.alias}</h2>
+          <p className="muted">
+            Full applicant analysis for the selected role
+          </p>
+        </div>
+        <button className="close-button" onClick={() => setSelectedApplication(null)}>
+          Close
+        </button>
+      </div>
+
+      <div className="pill-row wrap">
+        <ScorePill label="Match" score={selectedApplication.analysis.matchScore} />
+        <ScorePill label="Potential" score={selectedApplication.analysis.potentialScore} />
+        <ScorePill label="Fairness confidence" score={selectedApplication.analysis.fairnessConfidence} />
+      </div>
+
+      <div className="candidate-summary-box">
+        <strong>Overview</strong>
+        <p>{selectedApplication.analysis.summary}</p>
+      </div>
+
+      <div className="ranking-columns">
+        <div className="small-block strengths-block">
+          <strong>Strengths</strong>
+          <ul>
+            {selectedApplication.analysis.strengths.map((s) => (
+              <li key={s}>{s}</li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="small-block concerns-block">
+          <strong>Concerns</strong>
+          <ul>
+            {selectedApplication.analysis.concerns.map((c) => (
+              <li key={c}>{c}</li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+) : null}
             </>
           ) : (
             <>

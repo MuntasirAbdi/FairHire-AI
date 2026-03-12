@@ -1,155 +1,75 @@
-import { fallbackJobImport } from './fallbacks.js';
-import { rewriteJobDescription } from './geminiService.js';
+import axios from "axios";
+import * as cheerio from "cheerio";
 
-function parseJobKey(url) {
-  try {
-    const parsed = new URL(url);
-    return parsed.searchParams.get('jk') || parsed.pathname.split('/').filter(Boolean).pop() || 'unknown';
-  } catch {
-    return 'unknown';
-  }
+function cleanText(text) {
+  return text?.replace(/\s+/g, " ").trim() || "";
 }
 
-function stripHtml(html) {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function extractJsonLdJobPosting(html) {
-  const matches = [...html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
-  for (const match of matches) {
-    try {
-      const raw = match[1].trim();
-      const parsed = JSON.parse(raw);
-      const items = Array.isArray(parsed) ? parsed : [parsed];
-      for (const item of items) {
-        const node = item?.['@graph'] ? item['@graph'].find((x) => x?.['@type'] === 'JobPosting') : item;
-        if (node?.['@type'] === 'JobPosting') {
-          return {
-            title: node.title || node.name || '',
-            company: node.hiringOrganization?.name || '',
-            location: node.jobLocation?.address?.addressLocality || node.jobLocation?.address?.addressRegion || '',
-            description: stripHtml(node.description || '')
-          };
-        }
-      }
-    } catch {
-      // ignore invalid blocks
-    }
-  }
-  return null;
-}
-
-function extractMetaContent(html, property) {
-  const regex = new RegExp(`<meta[^>]+(?:property|name)=["']${property}["'][^>]+content=["']([^"']+)["']`, 'i');
-  return html.match(regex)?.[1]?.trim() || '';
-}
-
-function extractTitleTag(html) {
-  return html.match(/<title>([\s\S]*?)<\/title>/i)?.[1]?.replace(/\s+/g, ' ').trim() || '';
-}
-
-async function tryUrlExtraction(url) {
-  try {
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 FairHireAI Demo Extractor'
-      }
-    });
-    if (!response.ok) {
-      return null;
-    }
-    const html = await response.text();
-    const jsonLd = extractJsonLdJobPosting(html);
-    if (jsonLd?.description) {
-      return {
-        title: jsonLd.title || extractMetaContent(html, 'og:title') || 'Imported Job Posting',
-        company: jsonLd.company || 'Imported Company',
-        location: jsonLd.location || 'Location not detected',
-        description: jsonLd.description,
-        extractionMode: 'public-page-jsonld'
-      };
-    }
-
-    const description = extractMetaContent(html, 'og:description') || extractMetaContent(html, 'description');
-    const title = extractMetaContent(html, 'og:title') || extractTitleTag(html);
-    if (description || title) {
-      return {
-        title: title || 'Imported Job Posting',
-        company: 'Imported Company',
-        location: 'Location not detected',
-        description: description || 'Job description could not be fully extracted from the public page. Paste it manually for best results.',
-        extractionMode: 'public-page-meta'
-      };
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-export async function importIndeedPosting({ url, text }) {
-  if (!url && !text) throw new Error('Provide a job URL or paste a job description.');
-
-  const partnerEnabled = Boolean(process.env.INDEED_CLIENT_ID && process.env.INDEED_CLIENT_SECRET);
-
-  let baseJob;
-  let mode = 'manual-text';
-  if (text?.trim()) {
-    baseJob = {
-      title: 'Pasted Job Posting',
-      company: 'Manual Entry',
-      location: 'Unspecified',
-      description: text.trim()
+export async function importIndeedJob({ url, pastedText }) {
+  if (pastedText && pastedText.trim()) {
+    return {
+      title: "",
+      company: "",
+      location: "",
+      description: pastedText.trim(),
+      source: "manual"
     };
-  } else {
-    const extracted = await tryUrlExtraction(url);
-    if (extracted) {
-      baseJob = extracted;
-      mode = extracted.extractionMode;
-    } else {
-      baseJob = fallbackJobImport(url);
-      mode = 'demo-fallback';
-    }
   }
 
-  const imported = {
-    ...baseJob,
-    sourceUrl: url || '',
-    source: text?.trim()
-      ? 'Manual paste'
-      : partnerEnabled
-        ? 'Indeed Partner API adapter configured'
-        : mode === 'demo-fallback'
-          ? 'Fallback demo adapter'
-          : 'Best-effort public-page extraction',
-    externalId: url ? parseJobKey(url) : 'manual-entry'
-  };
+  if (!url || !url.trim()) {
+    throw new Error("Provide a job link or paste the job description.");
+  }
 
-  const rewritten = await rewriteJobDescription(imported);
-  return {
-    job: {
-      ...imported,
-      inclusiveDescription: rewritten.rewrittenDescription
-    },
-    analysis: rewritten.analysis,
-    importInfo: {
-      mode,
-      note: text?.trim()
-        ? 'Manual text was analyzed directly.'
-        : mode === 'demo-fallback'
-          ? 'Public extraction failed or the site blocked access, so the demo fallback was used. Paste the description manually for accurate results.'
-          : 'Public job content was extracted without official Indeed credentials. Results depend on what the public page exposes.'
-    },
-    indeed: {
-      mode: partnerEnabled ? 'partner-api-configured' : 'no-partner-api',
-      note: partnerEnabled
-        ? 'Add your approved Indeed partner API call pattern here once credentials and scopes are issued.'
-        : 'Official Indeed partner credentials are not configured. This build uses manual paste or best-effort public extraction instead.'
+  try {
+    const response = await axios.get(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-CA,en;q=0.9",
+        Referer: "https://www.google.com/"
+      },
+      timeout: 10000
+    });
+
+    const html = response.data;
+    const $ = cheerio.load(html);
+
+    const title =
+      cleanText($("h1").first().text()) ||
+      cleanText($("title").text());
+
+    const company =
+      cleanText($('[data-company-name="true"]').first().text()) ||
+      cleanText($(".jobsearch-InlineCompanyRating div").first().text());
+
+    const location =
+      cleanText($(".jobsearch-JobInfoHeader-subtitle div").last().text());
+
+    const description =
+      cleanText($("#jobDescriptionText").text()) ||
+      cleanText($("body").text());
+
+    if (!description || description.length < 100) {
+      throw new Error("Could not extract enough job description text from the page.");
     }
-  };
+
+    return {
+      title,
+      company,
+      location,
+      description,
+      source: "url"
+    };
+  } catch (error) {
+    if (error.response?.status === 403) {
+      throw new Error(
+        "This site blocked automated extraction. Please paste the full job description manually."
+      );
+    }
+
+    throw new Error(
+      error.message || "Failed to import the job posting from the link."
+    );
+  }
 }
